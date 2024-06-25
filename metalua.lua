@@ -129,6 +129,20 @@ function macro(impl)
 end
 
 function getenv(depth)
+    if type(depth) == "function" then
+        local env = {}
+        local i = 1
+        while true do
+            local name, value = debug.getlocal(depth, i)
+            if not name then
+              break
+            end
+
+            env[name] = value
+            i = i + 1
+        end
+        return env
+    end
     local env = {}
     for i = 1, debug.getinfo(1, "l").currentline do
         local name, value = debug.getlocal(depth + 2, i)
@@ -137,11 +151,13 @@ function getenv(depth)
         end
         env[name] = value
     end
-    return env
+    return setmetatable(_G, { __index = env })
 end
 
 function meta(code, env)
-    return load(code, "chunk", "t", env)()
+    local env = getenv(1)
+    local chunk = load(code, "chunk", "t", env)
+    return chunk(), env
 end
 
 function slice(tbl, min, max)
