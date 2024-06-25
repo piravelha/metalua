@@ -62,9 +62,9 @@ function tokenizer(input)
             else
                 add_token("name", word)
             end
-        elseif char:match("[+%-%*/!@#$%%&|:;,><=~%^%[%]]") then
+        elseif char:match("[+%-%*/!@#$%%&|:;,.><=~%^%[%]]") then
             local start = i
-            while i <= len and input:sub(i, i):match("[+%-%*/!@#$%%&|:;,><=~%^%[%]]") do
+            while i <= len and input:sub(i, i):match("[+%-%*/!@#$%%&|:;,.><=~%^%[%]]") do
                 i = i + 1
             end
             add_token("operator", input:sub(start, i - 1))
@@ -154,7 +154,8 @@ function getenv(depth)
     return setmetatable(_G, { __index = env })
 end
 
-function meta(code, env)
+function meta(code, ...)
+    code = string.format(tostring(code), ...)
     local env = getenv(1)
     local chunk = load(code, "chunk", "t", env)
     return chunk(), env
@@ -171,23 +172,45 @@ function slice(tbl, min, max)
     return new
 end
 
+function new_token(value)
+    local tokens = tokenizer(tostring(value))
+    return tokens[1]
+end
+
 function template(env, format_str, ...)
     return meta(string.format(
         "return " .. format_str, ...
     ), env)
 end
 
-function drop(token_stream)
-    table.remove(token_stream, 1)
+function pop(token_stream)
+    return table.remove(token_stream, 1)
 end
 
 function push(token_stream, token)
+    if type(token) ~= "table" then
+        token = new_token(token)
+    end
     table.insert(token_stream, token)
+end
+
+function extend(token_stream, tokens)
+    if type(tokens) ~= "table" then
+        tokens = tokenizer(tokens)
+    end
+    for i, tok in pairs(tokens) do
+        table.insert(token_stream, tok)
+    end
 end
 
 function expect(token_stream, expected)
     assert(token_stream[1].value == expected)
-    drop(token_stream)
+    pop(token_stream)
+end
+
+function expect_type(token_stream, expected)
+    assert(token_stream[1].type == expected)
+    return pop(token_stream)
 end
 
 function first(token_stream)
