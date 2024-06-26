@@ -1,9 +1,13 @@
 require "metalua"
+require "fstring"
 
 STATEMACHINE = macro(function(tokens)
     local stream = token_stream()
     local name = expect_type(tokens, "name")
-    extend(stream, tostring(name) .. " = function() return {"
+    expect(tokens, "(")
+    local default = expect_type(tokens, "name")
+    expect(tokens, ")")
+    extend(stream, tostring(name) .. " = function() local fsm = setmetatable({"
         .. [[set_state = function(self, state)
             self.state = function(self)
                 return state(self)
@@ -13,63 +17,81 @@ STATEMACHINE = macro(function(tokens)
         if #tokens == 1 and first(tokens) == "end" then
             break
         end
-        expect(tokens, "state")
-        local state = expect_type(tokens, "name")
-        extend(stream, tostring(state) .. [[ = function(self)]])
-        local body = token_stream()
-        while true do
-            if tokens[1].value == "state" and tokens[2].type == "name" then
-                extend(body, "self:set_state(self."
-                    .. tostring(tokens[2]) .. ")")
-                tokens = slice(tokens, 3)
-                expect(tokens, "end")
-                break
+        if tokens[1].value == "method" then
+            pop(tokens)
+            local method = expect_type(tokens, "name")
+            local params = balanced(tokens, "(", ")")
+            if #params > 0 then
+              prepend(params, ",")
             end
-            push(body, pop(tokens))
+            pop(tokens)
+            local body = token_stream()
+            while true do
+                if tokens[1].value == "end" and tokens[2].value == "state" or tokens[2].value == "method" then
+                    break
+                end
+                push(body, pop(tokens))
+            end
+            pop(tokens)
+            extend(stream, string.format([[
+                %s = function(self %s)
+                    %s
+                end,
+            ]], method, params, body))
         end
-        extend(stream, body)
-        extend(stream, "end,")
+        if tokens[1].value == "state" then
+            expect(tokens, "state")
+            local state = expect_type(tokens, "name")
+           extend(stream, tostring(state) .. [[ = function(self)]])
+            local body = token_stream()
+            while true do
+                if tokens[1].value == "state" and tokens[2].type == "name" then
+                    extend(body, "self:set_state(self."
+                        .. tostring(tokens[2]) .. ")")
+                    tokens = slice(tokens, 3)
+                    expect(tokens, "end")
+                    break
+                end
+                push(body, pop(tokens))
+            end
+            extend(stream, body)
+            extend(stream, "end,")
+        end
     end
-    extend(stream, "} end")
+    extend(stream, "}, {" .. [[
+        __call = function(self)
+            self:state()
+        end,
+    ]] .. "}) fsm:set_state(fsm."
+        .. tostring(default)
+        .. ")")
+    extend(stream, "return fsm end")
     return meta(getenv(1), stream)
 end)
 
-
 --> DEMO
 
-STATEMACHINE[[ LightSwitch
-    state on
-        print("The light is on")
-        state off
+local counter = 0
+
+STATEMACHINE[[ LightSwitch (Off)
+    method log_counter()
+        print(F"Counter: {counter}")
+        counter = counter + 1
     end
-    state off
-        print("The light is off")
-        state on
+    state On
+        print("The light is On")
+        self:log_counter()
+        state Off
+    end
+    state Off
+        print("The light is Off")
+        self:log_counter()
+        state On
     end
 end ]]
 
 local switch = LightSwitch()
-switch:set_state(switch.off)
-switch:state()
-switch:state()
-
-STATEMACHINE[[ TrafficLight
-    state Red
-        print("Light is Red")
-        state Green
-    end
-    state Green
-        print("Light is Green")
-        state Yellow
-    end
-    state Yellow
-        print("Light is Yellow")
-        state Red
-    end
-end ]]
-
-local light = TrafficLight()
-light:set_state(light.Red)
-light:state()
-light:state()
-light:state()
+switch()
+switch()
+switch()
+switch()

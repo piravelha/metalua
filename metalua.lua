@@ -151,7 +151,19 @@ function getenv(depth)
         end
         env[name] = value
     end
-    return setmetatable(_G, { __index = env })
+    local old_index = _G["#index"]
+    _G["#index"] = env
+    return setmetatable(_G, { __index = function(self, key)
+        if rawget(self, key) then
+            return rawget(self, key)
+        end
+        if env[key] then
+            return env[key]
+        end
+        if old_index and old_index[key] then
+            return old_index[key]
+        end
+    end})
 end
 
 function format(code, ...)
