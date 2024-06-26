@@ -158,9 +158,8 @@ function format(code, ...)
     return string.format(tostring(code), ...)
 end
 
-function meta(code, ...)
+function meta(env, code, ...)
     code = string.format(tostring(code), ...)
-    local env = getenv(1)
     local chunk = load(code, "chunk", "t", env)
     return chunk()
 end
@@ -185,9 +184,9 @@ function new_token(value)
 end
 
 function template(env, format_str, ...)
-    return meta(string.format(
+    return meta(env, string.format(
         "return " .. format_str, ...
-    ), env)
+    ))
 end
 
 function pop(token_stream)
@@ -289,6 +288,3 @@ function stop_at(tokens, pattern)
     end
     return match
 end
-
-local tokens = tokenizer("name, age, ...")
-print(_parse_params(tokens).values)

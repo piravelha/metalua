@@ -5,7 +5,7 @@ local L = macro(function(tokens)
         if tokens[1].type == "name" then
             if #tokens >= 2 and tokens[2].value == "=>" then
                 local name = pop(tokens)
-                drop(tokens)
+                pop(tokens)
                 local body = run(tokens)
                 return string.format(
                     "return function(%s) %s end",
@@ -16,10 +16,10 @@ local L = macro(function(tokens)
         return string.format("return %s", tokens)
     end
     local result = run(tokens)
-    return meta(result, getenv(1))
+    return meta(getenv(1), result)
 end)
 
 local add = L[[a => b => a + b]]
 local sub = L[[a => b => a - b]]
-local nested = L[[a => b => L("x => x")(a) + b]]
+local nested = L[[a => b => L[[x => x]\](a) + b]]
 print(nested(1)(2))

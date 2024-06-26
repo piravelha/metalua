@@ -1,93 +1,10 @@
 require "metalua"
 
-local json_number = function(value)
-    return setmetatable({
-        type = "number",
-        value = value,
-    }, {
-        __tostring = function(_)
-            return tostring(value)
-        end,
-    })
-end
-
-local json_string = function(value)
-    return setmetatable({
-        type = "string",
-        value = value,
-    }, {
-        __tostring = function(_)
-            return tostring(value)
-        end,
-    })
-end
-
-local json_bool = function(value)
-    return setmetatable({
-        type = "boolean",
-        value = value,
-    }, {
-        __tostring = function(_)
-            return tostring(value)
-        end,
-    })
-end
-
-local json_array = function(values)
-    return setmetatable({
-        type = "array",
-        value = values,
-    }, {
-        __tostring = function(_)
-            local str = "["
-            for i, v in pairs(values) do
-                if i > 1 then
-                    str = str .. ", "
-                end
-                str = str .. tostring(v)
-            end
-            return str .. "]"
-        end,
-    })
-end
-
-local json_field = function(key, value)
-    return setmetatable({
-        type = "field",
-        value = {key, value},
-    }, {
-        __tostring = function(_)
-            return tostring(key) .. ": " .. tostring(value)
-        end,
-    })
-end
-
-local json_object = function(values)
-    return setmetatable({
-        type = "object",
-        value = values,
-    }, {
-        __tostring = function(_)
-            local str = "{\n"
-            for i, v in pairs(values) do
-                v = tostring(v)
-                local new_v = ""
-                for line in v:gmatch("[^\r\n]+") do
-                    new_v = new_v .. "    " .. line .. "\n"
-                end
-                str = str .. new_v:sub(1, -2)
-                str = str .. ",\n"
-            end
-            return str .. "}"
-        end,
-    })
-end
-
 JSON_NUMBER = function(tokens, env)
     if tokens[1].type == "number" then
         return {
             success = true,
-            value = json_number(tonumber(first(tokens))),
+            value = tonumber(first(tokens)),
             rest = slice(tokens, 2),
         }
     end
@@ -96,7 +13,7 @@ JSON_NUMBER = function(tokens, env)
         if tonumber(result) then
             return {
                 success = true,
-                value = json_number(tonumber(result)),
+                value = tonumber(result),
                 rest = slice(tokens, 2),
             }
         end
@@ -110,7 +27,7 @@ JSON_STRING = function(tokens, env)
     if tokens[1].type == "string" then
         return {
             success = true,
-            value = json_string(first(tokens)),
+            value = first(tokens),
             rest = slice(tokens, 2),
         }
     end
@@ -119,7 +36,7 @@ JSON_STRING = function(tokens, env)
         if type(result) == "string" then
             return {
                 success = true,
-                value = json_string("\"" .. result .. "\""),
+                value = "\"" .. result .. "\"",
                 rest = slice(tokens, 2),
             }
         end
@@ -133,13 +50,13 @@ JSON_BOOL = function(tokens, env)
     if first(tokens) == "true" then
         return {
             success = true,
-            value = json_bool(true),
+            value = true,
             rest = slice(tokens, 2)
         }
     elseif first(tokens) == "false" then
         return {
             success = false,
-            value = json_bool(false),
+            value = false,
             rest = slice(tokens, 2),
         }
     end
@@ -154,7 +71,7 @@ JSON_ARRAY = function(tokens, env)
             success = false,
         }
     end
-    drop(tokens)
+    pop(tokens)
     local values = {}
     while true do
         if first(tokens) == "]" then
@@ -171,10 +88,10 @@ JSON_ARRAY = function(tokens, env)
         end
         expect(tokens, ",")
     end
-    drop(tokens)
+    pop(tokens)
     return {
         success = true,
-        value = json_array(values),
+        value = values,
         rest = tokens,
     }
 end
@@ -193,7 +110,7 @@ JSON_FIELD = function(tokens, env)
     tokens = value.rest
     return {
         success = true,
-        value = json_field(key.value, value.value),
+        value = {key.value, value.value},
         rest = tokens,
     }
 end
@@ -204,7 +121,7 @@ JSON_OBJECT = function(tokens, env)
             success = false,
         }
     end
-    drop(tokens)
+    pop(tokens)
     local values = {}
     while true do
         if first(tokens) == "}" then
@@ -214,17 +131,18 @@ JSON_OBJECT = function(tokens, env)
         if not result.success then
             return result
         end
-        push(values, result.value)
+        local key, value = result.value[1], result.value[2]
+        values[key:sub(2, -2)] = value
         tokens = result.rest
         if first(tokens) == "}" then
             break
         end
         expect(tokens, ",")
     end
-    drop(tokens)
+    pop(tokens)
     return {
         success = true,
-        value = json_object(values),
+        value = values,
         rest = tokens,
     }
 end
@@ -271,25 +189,12 @@ local second_hobby = "that's it"
 local person = json[[
     {
         "name": name,
-        "age": {
-            "value": age
-        },
+        "age": age,
         "hobbies": ["programming", second_hobby]
     }
 ]]
 
-print(person)
-
--- This prints out:
---[[
-{
-    "name": Ian,
-    "age": {
-        "value": 15,
-    },
-    "hobbies": ["programming", that's it],
-}
-]]
--- NOTE: 'person' is a nested table-tree structure, it is not just
--- string replacement, i literally made a json parser just to show
--- this, it just shows up pretty because of fancy __tostring metamethods
+print(person.name)
+print(person.age)
+print(person.hobbies[1])
+print(person.hobbies[2])

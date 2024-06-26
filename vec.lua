@@ -18,4 +18,14 @@ VEC = macro(function(tokens)
     )
 end)
 
-local my_vec = VEC[[ 1, 2, 3, 4, VEC[[ 5, 6, 7, 8 ]\] ]]
+local my_vec = VEC[[
+    VEC[[
+        VEC[[
+            1, 2, 3, 4,
+            VEC[[ 5, 6, 7, 8, 9 ]\\\]
+        ]\\]
+    ]\],
+    VEC[[ "d", "e", "f" ]\],
+    VEC[[ "g", "h", "i" ]\],
+]]
+print(my_vec)
