@@ -111,6 +111,587 @@ function tokenizer(input)
     return tokens
 end
 
+function _parse_number(tokens)
+    if tokens[1].type == "number" then
+        return {
+            success = true,
+            values = slice(tokens, 1, 1),
+            rest = slice(tokens, 2),
+        }
+    end
+    return {
+        success = false,
+    }
+end
+
+function _parse_string(tokens)
+    if tokens[1].type == "string" then
+        return {
+            success = true,
+            values = slice(tokens, 1, 1),
+            rest = slice(tokens, 2),
+        }
+    end
+    return {
+        success = false,
+    }
+end
+
+function _parse_boolean(tokens)
+    if tokens[1].type == "boolean" then
+        return {
+            success = true,
+            values = slice(tokens, 1, 1),
+            rest = slice(tokens, 2),
+        }
+    end
+    return {
+        success = false,
+    }
+end
+
+function _parse_nil(tokens)
+    if tokens[1].type == "nil" then
+        return {
+            success = true,
+            values = slice(tokens, 1, 1),
+            rest = slice(tokens, 2),
+        }
+    end
+    return {
+        success = false,
+    }
+end
+
+function _parse_unop(tokens)
+    local success = tokens[1].value == "-"
+        or tokens[1].value == "#"
+        or tokens[1].type == "name" and tokens[1].value == "not"
+    if success then
+        return {
+            success = true,
+            values = slice(tokens, 1, 1),
+            rest = slice(tokens, 2),
+        }
+    end
+    return {
+        success = false,
+    }
+end
+
+function _parse_binop(tokens)
+    local success = tokens[1].value == "+"
+        or tokens[1].value == "-"
+        or tokens[1].value == "*"
+        or tokens[1].value == "/"
+        or tokens[1].value == "^"
+        or tokens[1].value == "%"
+        or tokens[1].value == ".."
+        or tokens[1].value == "<"
+        or tokens[1].value == "<="
+        or tokens[1].value == ">"
+        or tokens[1].value == ">"
+        or tokens[1].value == "=="
+        or tokens[1].value == "~="
+        or tokens[1].value == "and"
+        or tokens[1].value == "or"
+    if success then
+        return {
+            success = true,
+            values = slice(tokens, 1, 1),
+            rest = slice(tokens, 2),
+        }
+    end
+    return {
+        success = false,
+    }
+end
+
+function _parse_sep(tokens)
+    local success = tokens[1].value == ","
+        or tokens[1].value == ";"
+    if success then
+        return {
+            success = true,
+            values = slice(tokens, 1, 1),
+            rest = slice(tokens, 2),
+        }
+    end
+    return {
+        success = false,
+    }
+end
+
+function _parse_field(tokens)
+    if tokens[1].value == "[" then
+        local result = _parse_expr(slice(tokens, 2))
+        if not result.success then return result end
+        tokens = result.rest
+        if tokens[1].value ~= "]" then
+            return {
+                success = false
+            }
+        end
+        local key = result.values
+        local result = _parse_expr(slice(tokens, 2))
+        if not result.success then return result end
+        tokens = result.rest
+        value = result.values
+        local new_tokens = token_stream()
+        push(new_tokens, "[")
+        extend(new_tokens, key)
+        push(new_tokens, "]")
+        extend(new_tokens, value)
+        push(new_tokens, "=")
+        return {
+            success = true,
+            values = new_tokens,
+            rest = tokens,
+        }
+    end
+    if tokens[1].type == "name" and tokens[2].value == "=" then
+        local key = slice(tokens, 1, 1)
+        local result = _parse_expr(slice(tokens, 3))
+        if not result.success then return result end
+        tokens = result.rest
+        value = result.values
+        local new_tokens = token_stream()
+        extend(new_tokens, key)
+        push(new_tokens, "=")
+        extend(new_tokens, value)
+        return {
+            success = true,
+            values = new_tokens,
+            rest = tokens,
+        }
+    end
+    return _parse_expr(tokens)
+end
+
+function _parse_fieldlist(tokens)
+    local result = _parse_field(tokens)
+    if not result.success then return result end
+    local first = result.values
+    tokens = result.rest
+    local tail = token_stream()
+    local new_tokens = token_stream()
+    while true do
+        local result = _parse_sep(tokens)
+        if not result.success then break end
+        local sep = result.values
+        tokens = result.rest
+        local result = _parse_field(tokens)
+        if not result.success then
+            extend(new_tokens, first)
+            extend(new_tokens, tail)
+            extend(new_tokens, sep)
+            return {
+                success = true,
+                values = new_tokens,
+                rest = tokens,
+            }
+        end
+        local field = result.values
+        tokens = result.rest
+        extend(tail, sep)
+        extend(tail, field)
+    end
+    extend(new_tokens, first)
+    extend(new_tokens, tail)
+    local result = _parse_sep(tokens)
+    if not result.success then
+        return {
+            success = true,
+            values = new_tokens,
+            rest = tokens,
+        }
+    end
+    local sep = result.values
+    tokens = result.rest
+    return {
+        success = true,
+        values = new_tokens,
+        rest = tokens,
+    }
+end
+
+function _parse_table(tokens)
+    if tokens[1].value ~= "{" then
+        return {
+            success = false,
+        }
+    end
+    local result = _parse_fieldlist(slice(tokens, 2))
+    if not result.success then
+        if tokens[2].value == "}" then
+            return {
+                success = true,
+                values = tokenizer("{}"),
+                rest = slice(tokens, 3),
+            }
+        end
+        return {
+            success = false,
+        }
+    end
+    local fields = result.values
+    prepend(fields, "{")
+    tokens = result.rest
+    if tokens[1].value ~= "}" then
+        return {
+            success = false,
+        }
+    end
+    push(fields, "}")
+    return {
+        success = true,
+        values = fields,
+        rest = tokens,
+    }
+end
+
+function _parse_atom(tokens)
+    local result = _parse_nil(tokens)
+    if result.success then return result end
+    local result = _parse_boolean(tokens)
+    if result.success then return result end
+    local result = _parse_number(tokens)
+    if result.success then return result end
+    local result = _parse_string(tokens)
+    if result.success then return result end
+    local result = _parse_table(tokens)
+    if result.success then return result end
+    if tokens[1].value == "..." then
+        return {
+            success = true,
+            values = slice(tokens, 1, 1),
+            rest = slice(tokens, 2),
+        }
+    end
+    local result = _parse_func(tokens)
+    if result.success then return result end
+    local result = _parse_prefixexpr(tokens)
+    if result.success then return result end
+    local result = _parse_unop(tokens)
+    local new_tokens = token_stream()
+    if not result.success then
+        return {
+            success = false,
+        }
+    end
+    local op = result.values
+    tokens = result.rest
+    extend(new_tokens, op)
+    local result = _parse_expr(tokens)
+    if not result.success then
+        return {
+            success = false,
+        }
+    end
+    local value = result.values
+    tokens = result.rest
+    extend(new_tokens, value)
+    return {
+        success = true,
+        values = new_tokens,
+        rest = tokens,
+    }
+end
+
+function _parse_expr(tokens)
+    local new_tokens = token_stream()
+    local result = _parse_atom(tokens)
+    if not result.success then return result end
+    local first = result.values
+    extend(new_tokens, first)
+    tokens = result.rest
+    while true do
+        local old_result = clone(new_tokens)
+        local old_tokens = clone(tokens)
+        local result = _parse_binop(tokens)
+        if not result.success then
+            return {
+                success = true,
+                values = old_result,
+                rest = old_tokens,
+            }
+        end
+        local binop = result.values
+        tokens = result.rest
+        extend(new_tokens, binop)
+        local result = _parse_atom(tokens)
+        if not result.success then
+            return {
+                success = true,
+                values = old_result,
+                rest = old_tokens,
+            }
+        end
+        local value = result.values
+        tokens = result.rest
+        extend(new_tokens, value)
+    end
+    return {
+        success = true,
+        values = new_tokens,
+        rest = tokens,
+    }
+end
+
+function _parse_params(tokens)
+    local result = _parse_names(tokens)
+    if not result.success then
+        if tokens[1].value == "..." then
+            return {
+                success = true,
+                values = slice(tokens, 1, 1),
+                rest = slice(tokens, 2),
+            }
+        end
+        return {
+            success = false,
+        }
+    end
+    local new_tokens = token_stream()
+    local names = result.values
+    extend(new_tokens, names)
+    tokens = result.rest
+    if #tokens >= 2 and tokens[1].value == "," and tokens[2].value == "..." then
+        extend(new_tokens, ", ...")
+        return {
+            success = true,
+            values = new_tokens,
+            rest = slice(tokens, 3),
+        }
+    end
+    return {
+        success = true,
+        values = new_tokens,
+        rest = tokens,
+    }
+end
+
+function _parse_names(tokens)
+    local result = _parse_name(tokens)
+    if not result.success then return result end
+    local new_tokens = token_stream()
+    local first = result.values
+    tokens = result.rest
+    extend(new_tokens, first)
+    while true do
+        local old_result = clone(new_tokens)
+        local old_tokens = clone(tokens)
+        if #tokens == 0 or tokens[1].value ~= "," then
+            return {
+                success = true,
+                values = old_result,
+                rest = old_tokens,
+            }
+        end
+        push(new_tokens, ",")
+        local result = _parse_name(slice(tokens, 2))
+        if not result.success then
+            return {
+                success = true,
+                values = old_result,
+                rest = old_tokens,
+            }
+        end
+        local name = result.values
+        tokens = result.rest
+        extend(new_tokens, name)
+    end
+    return {
+        success = true,
+        values = new_tokens,
+        rest = tokens,
+    }
+end
+
+function _parse_name(tokens)
+    if tokens[1].type == "name" then
+        return {
+            success = true,
+            values = slice(tokens, 1, 1),
+            rest = slice(tokens, 2),
+        }
+    end
+    return {
+        success = false,
+    }
+end
+
+function _parse_funcbody(tokens)
+    local new_tokens = token_stream()
+    if tokens[1].value ~= "(" then
+        return {
+            success = false,
+        }
+    end
+    push(new_tokens, "(")
+    tokens = slice(tokens, 2)
+    local result = _parse_params(tokens)
+    if result.success then
+        local params = result.values
+        tokens = params.rest
+        extend(new_tokens, params)
+    end
+    if tokens[1].value ~= ")" then
+        return {
+            success = false,
+        }
+    end
+    push(new_tokens, ")")
+    local result = _parse_block(tokens)
+    if not result then return result end
+    local block = result.values
+    tokens = result.rest
+    extend(new_tokens, block)
+    if tokens[1].value ~= "end" then
+        return {
+            success = false,
+        }
+    end
+    push(new_tokens, "end")
+    tokens = slice(tokens, 2)
+    return {
+        success = true,
+        values = new_tokens,
+        rest = tokens,
+    }
+end
+
+function _parse_func(tokens)
+    local new_tokens = token_stream()
+    if tokens[1].value ~= "function" then
+        return {
+            success = false,
+        }
+    end
+    push(new_tokens, "function")
+    tokens = slice(tokens, 2)
+    local result = _parse_funcbody(tokens)
+    if not result then return result end
+    local body = result.values
+    tokens = result.rest
+    return {
+        success = false,
+        values = new_tokens,
+        rest = tokens,
+    }
+end
+
+function _parse_args(tokens)
+    local result = _parse_string(tokens)
+    if result.success then return result end
+    local result = _parse_table(tokens)
+    if result.success then return result end
+    if tokens[1].value ~= "(" then
+        return {
+            success = false,
+        }
+    end
+    tokens = slice(tokens, 2)
+    local result = _parse_exprs(tokens)
+    if not result.success then
+        if tokens[1].value ~= ")" then
+            return {
+                success = false,
+            }
+        end
+        tokens = slice(tokens, 2)
+        return {
+            success = true,
+            values = tokenizer("()"),
+            rest = tokens,
+        }
+    end
+    local exprs = result.values
+    tokens = result.rest
+    prepend(exprs, "(")
+    push(exprs, ")")
+    return {
+        success = true,
+        values = exprs,
+        rest = tokens,
+    }
+end
+
+function _parse_funccall(tokens)
+    local result = _parse_prefixexpr(tokens)
+    if not result.success then return result end
+    local prefixexpr = result.values
+    tokens = result.rest
+    local result = _parse_args(tokens)
+    if not result.success then return result end
+    local args = result.values
+    tokens = result.rest
+    extend(prefixexpr, args)
+    return {
+        success = true,
+        values = prefixexpr,
+        rest = tokens,
+    }
+end
+
+function _parse_prefixexpr(tokens)
+    local result = _parse_var(tokens)
+    if result.success then return result end
+    local result = _parse_funccall(tokens)
+    if result.success then return result end
+    local new_tokens = token_stream()
+    if tokens[1].value ~= "(" then
+        return {
+            success = false,
+        }
+    end
+    push(new_tokens, "(")
+    local result = _parse_expr(tokens)
+    if not result.success then return result end
+    local expr = result.values
+    tokens = result.rest
+    if tokens[1].value ~= ")" then
+        return {
+            success = false,
+        }
+    end
+    return {
+        success = true,
+        values = new_tokens,
+        rest = tokens,
+    }
+end
+
+function _parse_exprs(tokens)
+    local new_tokens = token_stream()
+    local result = _parse_expr(tokens)
+    if result.success then return result end
+    local first = result.values
+    extend(new_tokens, first)
+    tokens = result.rest
+    while true do
+        if tokens[1].value ~= "," then
+            return {
+                success = true,
+                values = new_tokens,
+                rest = tokens,
+            }
+        end
+        extend(new_tokens, ",")
+        tokens = slice(tokens, 2)
+        local result = _parse_expr(tokens)
+        if not result.success then return result end
+        local expr = result.values
+        tokens = result.rest
+        extend(new_tokens, expr)
+    end
+    return {
+        success = true,
+        values = new_tokens,
+        rest = tokens,
+    }
+end
+
 function clone(tokens)
     local new = token_stream()
     for i, v in pairs(tokens) do
