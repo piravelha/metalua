@@ -62,12 +62,15 @@ function tokenizer(input)
             else
                 add_token("name", word)
             end
-        elseif char:match("[+%-%*/!@#$%%&|:;,.><=~%^%[%]\\]") then
+        elseif char:match("[+%-%*/!@#$%%&|:.><=~%^%[%]\\]") then
             local start = i
-            while i <= len and input:sub(i, i):match("[+%-%*/!@#$%%&|:;,.><=~%^%[%]\\]") do
+            while i <= len and input:sub(i, i):match("[+%-%*/!@#$%%&|:.><=~%^%[%]\\]") do
                 i = i + 1
             end
             add_token("operator", input:sub(start, i - 1):gsub("\\%[", "["):gsub("\\%]", "]"))
+        elseif char:match("[;,]") then
+            i = i + 1
+            add_token("delimiter", char)
         elseif char:match("[()]") then
             i = i + 1
             add_token("paren", char)
@@ -152,7 +155,16 @@ function getenv(depth)
         env[name] = value
     end
     local old_index = _G["#index"]
-    _G["#index"] = env
+    local new_env = {}
+    for k, v in pairs(env) do
+        new_env[k] = v
+    end
+    if old_index then
+        for k, v in pairs(old_index) do
+            new_env[k] = v
+        end
+    end
+    _G["#index"] = new_env
     return setmetatable(_G, { __index = function(self, key)
         if rawget(self, key) then
             return rawget(self, key)
@@ -166,14 +178,54 @@ function getenv(depth)
     end})
 end
 
+function setvar(name, value, depth)
+    depth = depth or 2
+    local i = 1
+    while true do
+        local var_name = debug.getlocal(depth, i)
+        if not var_name then
+            break
+        end
+        if var_name == name then
+            debug.setlocal(depth, i, value)
+            return true
+        end
+        i = i + 1
+    end
+    _G[name] = value
+    return false
+end
+
 function format(code, ...)
     return string.format(tostring(code), ...)
 end
 
 function meta(env, code, ...)
-    code = string.format(tostring(code), ...)
-    local chunk = load(code, "chunk", "t", env)
-    return chunk()
+    local formats = {...}
+
+    if type(env) ~= "table" or not getmetatable(env) or not getmetatable(env).__tostring then
+        formats = {code, ...}
+        code = env
+        env = getenv(2)
+    end
+
+    code = string.format("return " .. tostring(code), table.unpack(formats))
+
+    local chunk, err = load(code, "chunk", "t", setmetatable({}, {
+        __index = env,
+        __newindex = function(_, name, value)
+            if not setvar(name, value, 4) then
+                rawset(_G, name, value)
+            end
+        end
+    }))
+    
+    if chunk then
+        return chunk()
+    end
+    
+    print("DEBUG: syntax error detected in chunk: [[\n" .. tostring(code) .. "\n]]")
+    error(err)
 end
 
 function slice(tbl, min, max)
@@ -229,7 +281,7 @@ function extend(token_stream, tokens)
 end
 
 function expect(token_stream, expected)
-    assert(token_stream[1].value == expected)
+    assert(token_stream[1].value == expected, "SYNTAX ERROR: Expected " .. tostring(expected) .. ", but got " .. tostring(token_stream[1]) .. " instead")
     return pop(token_stream)
 end
 
@@ -253,6 +305,7 @@ function balanced(tokens, open, close)
         end
         if token.value == close then
             counter = counter - 1
+            if open == close then counter = counter - 1 end
         end
         if counter < 1 then
             prepend(tokens, new_token(close))
@@ -300,3 +353,51 @@ function stop_at(tokens, pattern)
     end
     return match
 end
+
+local function split_str(inputstr, sep)
+    if sep == nil then
+        sep = "%s"
+    end
+    local t = {}
+    for str in string.gmatch(inputstr, "([^"..sep.."]+)") do
+        table.insert(t, str)
+    end
+    return t
+end
+
+function split_by(tokens, separator, ignores)
+    ignores = ignores or {"{ }", "[ ]", "( )"}
+    local groups = {}
+    local current_group = token_stream()
+    while true do
+        if #tokens == 0 then
+            table.insert(groups, current_group)
+            break
+        end
+        local token = pop(tokens)
+        local open, close
+        for _, ignore in pairs(ignores) do
+            ignore = split_str(ignore)
+            local cur_open, cur_close = ignore[1], ignore[2]
+            if token.value == cur_open then
+                open = cur_open
+                close = cur_close
+            end
+        end
+        if open and close then
+            prepend(tokens, token)
+            local capture = balanced(tokens, open, close)
+            push(current_group, token)
+            extend(current_group, capture)
+            push(current_group, pop(tokens))
+        elseif token.value == separator then
+            table.insert(groups, current_group)
+            current_group = token_stream()
+        else
+            push(current_group, token)
+        end
+    end
+    return groups
+end
+
+unpack = table.unpack
