@@ -14,10 +14,9 @@ STRUCT = macro(function(tokens)
     end
     push(field_names, "}")
     expect(tokens, "}")
-    return meta([[
+    return meta(getenv(1), [[
         local fields = %s
-        function %s(...)
-            local values = {...}
+        function %s(values)
             local struct = {}
             for i, val in pairs(values) do
                 local field = fields[i]
@@ -25,7 +24,7 @@ STRUCT = macro(function(tokens)
             end
             return setmetatable(struct, {
                 __tostring = function(self)
-                    local str = "%s{"
+                    local str = "%s {"
                     for i, field in pairs(fields) do
                         if i > 1 then
                             str = str .. ", "
@@ -46,5 +45,8 @@ STRUCT[[ Person {
     email,
 } ]]
 
-print(Person("Ian", 15, "piralocojacavelha@gmail.com"))
-
+print(Person {
+    "Ian",
+    15,
+    "piralocojacavelha@gmail.com",
+})

@@ -7,14 +7,16 @@ STATEMACHINE = macro(function(tokens)
     expect(tokens, "(")
     local default = expect_type(tokens, "name")
     expect(tokens, ")")
-    extend(stream, tostring(name) .. " = function() local fsm = setmetatable({"
-        .. [[set_state = function(self, state)
-            self.state = function(self)
-                return state(self)
-            end
-        end,]])
+    extend(stream, tostring(name) .. [[ = function()
+            local fsm = setmetatable({
+                set_state = function(self, state)
+                    self.state = function(self)
+                        return state(self)
+                    end
+                end,
+        ]])
     while true do
-        if #tokens == 1 and first(tokens) == "end" then
+        if #tokens <= 1 then
             break
         end
         if tokens[1].value == "method" then
@@ -27,6 +29,9 @@ STATEMACHINE = macro(function(tokens)
             pop(tokens)
             local body = token_stream()
             while true do
+                if tokens[1].value == "end" and #tokens == 2 then
+                    break
+                end
                 if tokens[1].value == "end" and tokens[2].value == "state" or tokens[2].value == "method" then
                     break
                 end
@@ -38,14 +43,13 @@ STATEMACHINE = macro(function(tokens)
                     %s
                 end,
             ]], method, params, body))
-        end
-        if tokens[1].value == "state" then
+        elseif tokens[1].value == "state" then
             expect(tokens, "state")
             local state = expect_type(tokens, "name")
-           extend(stream, tostring(state) .. [[ = function(self)]])
+            extend(stream, tostring(state) .. [[ = function(self)]])
             local body = token_stream()
             while true do
-                if tokens[1].value == "state" and tokens[2].type == "name" then
+                if tokens[1].value == "state" or tokens[1].value == "method" and tokens[2].type == "name" then
                     extend(body, "self:set_state(self."
                         .. tostring(tokens[2]) .. ")")
                     tokens = slice(tokens, 3)
@@ -58,25 +62,24 @@ STATEMACHINE = macro(function(tokens)
             extend(stream, "end,")
         end
     end
-    extend(stream, "}, {" .. [[
-        __call = function(self)
-            self:state()
-        end,
-    ]] .. "}) fsm:set_state(fsm."
-        .. tostring(default)
-        .. ")")
-    extend(stream, "return fsm end")
+    extend(stream, [[ }, { ]]
+        .. [[
+            __call = function(self)
+                self:state()
+            end,
+        })
+        fsm:set_state(fsm. ]] .. tostring(default) .. ")"
+        .. [[ return fsm
+    end ]]
+    )
     return meta(getenv(1), stream)
 end)
-
---> DEMO
 
 local counter = 0
 
 STATEMACHINE[[ LightSwitch (Off)
-    method log_counter()
-        print(F"Counter: {counter}")
-        counter = counter + 1
+    method square(x)
+        return x * x
     end
     state On
         print("The light is On")
@@ -87,6 +90,12 @@ STATEMACHINE[[ LightSwitch (Off)
         print("The light is Off")
         self:log_counter()
         state On
+    end
+    method log_counter()
+        print(F"Counter: {counter}")
+        local squared = self:square(counter)
+        print(F"Squared: {squared}")
+        counter = counter + 1
     end
 end ]]
 
