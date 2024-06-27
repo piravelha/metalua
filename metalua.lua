@@ -1,3 +1,7 @@
+local source = ""
+local out_path = ""
+local applied_macros = {}
+
 function token_stream()
     return setmetatable({}, {
         __tostring = function(self)
@@ -11,6 +15,17 @@ function token_stream()
             return str
         end,
     })
+end
+
+local function split_str(inputstr, sep)
+    if sep == nil then
+        sep = "%s"
+    end
+    local t = {}
+    for str in string.gmatch(inputstr, "([^"..sep.."]+)") do
+        table.insert(t, str)
+    end
+    return t
 end
 
 function tokenizer(input)
@@ -123,10 +138,22 @@ function clone(tokens)
 end
 
 function macro(impl)
+    local info = debug.getinfo(2, "S")
+    local name
+    if info and info.source then
+        out_path = info.source:sub(2, -5) .. ".meta.lua"
+        local file = io.open(info.source:sub(2), "r")
+        if file then
+            source = file:read("*all")
+            local line = debug.getinfo(2, "l").currentline
+            lines = split_str(source, "\n")
+            name = lines[line - 1]:match("(%w+)%s*=.+")
+            file:close()
+        end
+    end
     local function wrapper(code)
-        depth = depth or 1
         local tokens = tokenizer(code)
-        return impl(clone(tokens))
+        meta(code, name, impl(clone(tokens)))
     end
     return wrapper
 end
@@ -200,32 +227,9 @@ function format(code, ...)
     return string.format(tostring(code), ...)
 end
 
-function meta(env, code, ...)
-    local formats = {...}
-
-    if type(env) ~= "table" or not getmetatable(env) or not getmetatable(env).__tostring then
-        formats = {code, ...}
-        code = env
-        env = getenv(2)
-    end
-
-    code = string.format("return " .. tostring(code), table.unpack(formats))
-
-    local chunk, err = load(code, "chunk", "t", setmetatable({}, {
-        __index = env,
-        __newindex = function(_, name, value)
-            if not setvar(name, value, 4) then
-                rawset(_G, name, value)
-            end
-        end
-    }))
-    
-    if chunk then
-        return chunk()
-    end
-    
-    print("DEBUG: syntax error detected in chunk: [[\n" .. tostring(code) .. "\n]]")
-    error(err)
+function meta(code, name, template, ...)
+    template = string.format(tostring(template), ...)
+    table.insert(applied_macros, {code, name, template})
 end
 
 function slice(tbl, min, max)
@@ -354,17 +358,6 @@ function stop_at(tokens, pattern)
     return match
 end
 
-local function split_str(inputstr, sep)
-    if sep == nil then
-        sep = "%s"
-    end
-    local t = {}
-    for str in string.gmatch(inputstr, "([^"..sep.."]+)") do
-        table.insert(t, str)
-    end
-    return t
-end
-
 function split_by(tokens, separator, ignores)
     ignores = ignores or {"{ }", "[ ]", "( )"}
     local groups = {}
@@ -400,4 +393,34 @@ function split_by(tokens, separator, ignores)
     return groups
 end
 
+local function escape_magic_characters(text)
+    local magic_chars = "().%+-*?[]^$"
+    for i = 1, #magic_chars do
+        local char = magic_chars:sub(i, i)
+        text = text:gsub("%" .. char, "%%" .. char)
+    end
+    return text:gsub("[" .. magic_chars .. "]", "%%%1")
+end
+
 unpack = table.unpack
+
+local generated = false
+
+function generate()
+    assert(not generated, "Can only generate code once", 2)
+    generated = true
+    for _, macro in pairs(applied_macros) do
+        local pattern, name, replacement = unpack(macro)
+        pattern = name .. "%[%[" .. escape_magic_characters(pattern) .. "%]%]"
+        replacement = replacement:gsub("%%", "%%%%")
+        source = source:gsub(pattern, replacement)
+    end
+    if source:match("%w+%s*=%s*macro%([%s%S]-end%)\n") then
+        error("It appears you made a macro definition without including a ';' at the end, this is currently necessary in order to exclude macro definitions in the generated code, also, try not to use semicolons anywhere else in your code, because it may break this.", 2)
+    end
+    source = source:gsub("%w+%s*=%s*macro%([%s%S]-end%);", "")
+    local file = io.open(out_path, "w")
+    assert(file, "Invalid output path", 2)
+    file:write(source)
+    file:close()
+end
